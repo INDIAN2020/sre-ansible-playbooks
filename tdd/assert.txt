@@ -1,0 +1,9 @@
+- name: Check a task is pass or fail
+  ansible.builtin.assert:
+    # that: bond_interfaces|unique|length == bond_interfaces|length
+    #       in, not in, 
+    # fail_msg: Two or more interfaces repeat in bond_interfaces
+    # success_msg: All interfaces in bond_interfaces are unique.
+    # msg: not considering it is fail or success then print the message
+    # quiet: If its value is true then it avoid verbose output
+  # when: check the condition and execute when it is valid
