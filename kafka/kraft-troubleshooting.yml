@@ -1,0 +1,130 @@
+---
+- name: Troubleshoot Kafka KRaft Cluster
+  hosts: kafka_servers
+  become: true
+  vars:
+    kafka_home: "/opt/kafka"
+    data_dir: "/var/lib/kafka"
+    log_dir: "/var/log/kafka"
+    config_file: "{{ kafka_home }}/config/kraft/server.properties"
+  tasks:
+    - name: Check Kafka service status
+      command: systemctl status kafka
+      register: kafka_status
+      ignore_errors: yes
+
+    - name: Print Kafka service status
+      debug:
+        var: kafka_status.stdout
+
+    - name: Check Kafka logs for errors
+      command: journalctl -u kafka -n 50
+      register: kafka_logs
+      ignore_errors: yes
+
+    - name: Print Kafka logs
+      debug:
+        var: kafka_logs.stdout
+
+    - name: Validate Kafka configuration
+      command: cat {{ config_file }}
+      register: kafka_config
+      ignore_errors: yes
+
+    - name: Print Kafka configuration
+      debug:
+        var: kafka_config.stdout
+
+    - name: Check disk space
+      command: df -h
+      register: disk_space
+      ignore_errors: yes
+
+    - name: Print disk space
+      debug:
+        var: disk_space.stdout
+
+    - name: Check directory permissions
+      command: ls -l {{ item }}
+      with_items:
+        - "{{ data_dir }}"
+        - "{{ log_dir }}"
+      register: dir_permissions
+      ignore_errors: yes
+
+    - name: Print directory permissions
+      debug:
+        var: dir_permissions.results
+
+    - name: Verify network connectivity to other nodes
+      command: ping -c 3 {{ item }}
+      with_items: "{{ groups['kafka_servers'] }}"
+      register: ping_results
+      ignore_errors: yes
+
+    - name: Print network connectivity results
+      debug:
+        var: ping_results.results
+
+    - name: Verify Java version
+      command: java -version
+      register: java_version
+      ignore_errors: yes
+
+    - name: Print Java version
+      debug:
+        var: java_version.stderr
+
+    - name: List Kafka topics
+      command: "{{ kafka_home }}/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list"
+      register: kafka_topics
+      ignore_errors: yes
+
+    - name: Print Kafka topics
+      debug:
+        var: kafka_topics.stdout
+
+    - name: Describe Kafka topic
+      command: "{{ kafka_home }}/bin/kafka-topics.sh --bootstrap-server localhost:9092 --describe --topic test-topic"
+      register: kafka_topic_description
+      ignore_errors: yes
+
+    - name: Print Kafka topic description
+      debug:
+        var: kafka_topic_description.stdout
+
+    - name: Check Kafka controller status
+      command: "{{ kafka_home }}/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092"
+      register: kafka_controller_status
+      ignore_errors: yes
+
+    - name: Print Kafka controller status
+      debug:
+        var: kafka_controller_status.stdout
+
+    - name: Check Kafka controller quorum
+      command: "{{ kafka_home }}/bin/kafka-metadata-shell.sh --snapshot /var/lib/kafka/meta.properties --metadata-broker-list server1:9093,server2:9093,server3:9093 --command describe --entity-type brokers"
+      register: kafka_quorum
+      ignore_errors: yes
+
+    - name: Print Kafka controller quorum
+      debug:
+        var: kafka_quorum.stdout
+
+    - name: Restart Kafka service
+      systemd:
+        name: kafka
+        state: restarted
+        enabled: yes
+      notify:
+        - Check Kafka service status after restart
+
+  handlers:
+    - name: Check Kafka service status after restart
+      command: systemctl status kafka
+      register: kafka_status_after_restart
+      ignore_errors: yes
+
+    - name: Print Kafka service status after restart
+      debug:
+        var: kafka_status_after_restart.stdout
