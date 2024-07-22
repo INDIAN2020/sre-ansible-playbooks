@@ -1,0 +1,94 @@
+---
+- name: Setup Kafka KRaft cluster with SSL and ACLs
+  hosts: kafka_servers
+  become: true
+  vars:
+    kafka_version: "3.0.0"
+    kafka_home: "/opt/kafka"
+    data_dir: "/var/lib/kafka"
+    log_dir: "/var/log/kafka"
+    config_file: "{{ kafka_home }}/config/kraft/server.properties"
+    user: "kafka"
+    ssl_keystore_location: "/etc/kafka/secrets/kafka.keystore.jks"
+    ssl_truststore_location: "/etc/kafka/secrets/kafka.truststore.jks"
+    ssl_keystore_password: "your-keystore-password"
+    ssl_truststore_password: "your-truststore-password"
+  tasks:
+    - name: Create data and log directories
+      file:
+        path: "{{ item }}"
+        state: directory
+        owner: "{{ user }}"
+        group: "{{ user }}"
+        mode: '0755'
+      with_items:
+        - "{{ data_dir }}"
+        - "{{ log_dir }}"
+
+    - name: Ensure Kafka config directory exists
+      file:
+        path: "{{ kafka_home }}/config/kraft"
+        state: directory
+        owner: "{{ user }}"
+        group: "{{ user }}"
+        mode: '0755'
+
+    - name: Configure Kafka KRaft mode
+      blockinfile:
+        path: "{{ config_file }}"
+        create: yes
+        block: |
+          node.id={{ item.index }}
+          process.roles=broker,controller
+          controller.quorum.voters=0@server1:9093,1@server2:9093,2@server3:9093
+          listeners=PLAINTEXT://:9092,CONTROLLER://:9093,SSL://:9094
+          listener.security.protocol.map=PLAINTEXT:PLAINTEXT,SSL:SSL,CONTROLLER:PLAINTEXT
+          inter.broker.listener.name=SSL
+          log.dirs={{ data_dir }}
+          num.network.threads=3
+          num.io.threads=8
+          socket.send.buffer.bytes=102400
+          socket.receive.buffer.bytes=102400
+          socket.request.max.bytes=104857600
+          log.retention.hours=168
+          log.segment.bytes=1073741824
+          log.retention.check.interval.ms=300000
+          ssl.keystore.location={{ ssl_keystore_location }}
+          ssl.keystore.password={{ ssl_keystore_password }}
+          ssl.truststore.location={{ ssl_truststore_location }}
+          ssl.truststore.password={{ ssl_truststore_password }}
+          ssl.client.auth=required
+      with_indexed_items: "{{ groups['kafka_servers'] }}"
+      notify:
+        - Start Kafka
+
+    - name: Start Kafka service
+      systemd:
+        name: kafka
+        state: started
+        enabled: yes
+      when: false  # We use handler to start Kafka
+
+    - name: Setup Kafka ACLs for topics
+      command: "{{ kafka_home }}/bin/kafka-acls.sh --authorizer-properties zookeeper.connect=localhost:2181 --add --allow-principal User:* --operation All --topic '*'"
+      become_user: "{{ user }}"
+      changed_when: false
+
+    - name: Setup Kafka ACLs for consumer groups
+      command: "{{ kafka_home }}/bin/kafka-acls.sh --authorizer-properties zookeeper.connect=localhost:2181 --add --allow-principal User:* --operation All --group '*'"
+      become_user: "{{ user }}"
+      changed_when: false
+
+  handlers:
+    - name: Start Kafka
+      systemd:
+        name: kafka
+        state: restarted
+        enabled: yes
+
+  post_tasks:
+    - name: Assert Kafka is running
+      assert:
+        that:
+          - "ansible_facts.services['kafka'].state == 'running'"
+
